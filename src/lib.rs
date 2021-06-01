@@ -276,6 +276,28 @@ impl From<Mm> for printpdf::Pt {
     }
 }
 
+/// The alignment of a [`Paragraph`][] or ['Image'][].
+///
+/// The default alignment is left-flushed.
+///
+/// [`Paragraph`]: struct.Paragraph.html
+/// [`Image`]: struct.Image.html
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum Alignment {
+    /// Left-flushed.
+    Left,
+    /// Right-flushed.
+    Right,
+    /// Centered.
+    Center,
+}
+
+impl Default for Alignment {
+    fn default() -> Alignment {
+        Alignment::Left
+    }
+}
+
 /// A position on a PDF layer, measured in millimeters.
 ///
 /// All positions used by `genpdf` are measured from the top left corner of the reference area.
@@ -306,6 +328,73 @@ impl From<Position> for printpdf::Point {
 impl<X: Into<Mm>, Y: Into<Mm>> From<(X, Y)> for Position {
     fn from(values: (X, Y)) -> Position {
         Position::new(values.0, values.1)
+    }
+}
+
+/// A rotation in degrees clock-wise in range [-180.0, 180.0] inclusive.
+#[derive(Clone, Copy, Default, Debug, PartialEq, PartialOrd, Add, AddAssign, Sub, SubAssign)]
+pub struct Rotation {
+    degrees: f64,
+}
+
+impl Rotation {
+    /// Create a new rotation with the given number of degrees.
+    pub fn from_degrees(rotation: f64) -> Self {
+        let degrees: f64 = match rotation % 360.0 {
+            deg if deg > 180.0 => 360.0 - deg,
+            deg if deg < -180.0 => 360.0 + deg,
+            deg => deg,
+        };
+        Rotation { degrees }
+    }
+}
+
+impl From<f64> for Rotation {
+    fn from(degrees: f64) -> Rotation {
+        // Perhaps a poor assumption that we'll always work with degrees?
+        Rotation::from_degrees(degrees)
+    }
+}
+
+impl From<Rotation> for Option<f64> {
+    fn from(rotation: Rotation) -> Option<f64> {
+        if rotation.degrees != 0.0 {
+            Some(rotation.degrees)
+        } else {
+            None
+        }
+    }
+}
+
+/// A size to stretch an image on a PDF layer; measured in percentage.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Add, AddAssign, Sub, SubAssign)]
+pub struct Scale {
+    /// The percentage to scale on the x-axis.
+    pub x: f64,
+    /// The percentage to scale on the y-axis.
+    pub y: f64,
+}
+
+// Overriding default of (0,0) as that would scale it to 0.
+impl Default for Scale {
+    fn default() -> Scale {
+        Scale::new(1,1)
+    }
+}
+
+impl Scale {
+    /// Creates a new scale for the given x/y values.
+    pub fn new(x: impl Into<f64>, y: impl Into<f64>) -> Scale {
+        Scale {
+            x: x.into(),
+            y: y.into(),
+        }
+    }
+}
+
+impl<X: Into<f64>, Y: Into<f64>> From<(X, Y)> for Scale {
+    fn from(values: (X, Y)) -> Scale {
+        Scale::new(values.0, values.1)
     }
 }
 

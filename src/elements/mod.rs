@@ -46,7 +46,13 @@ use crate::error::{Error, ErrorKind};
 use crate::render;
 use crate::style::{Style, StyledString};
 use crate::wrap;
-use crate::{Context, Element, Margins, Mm, Position, RenderResult, Size};
+use crate::{Alignment, Context, Element, Margins, Mm, Position, RenderResult, Size};
+
+// Import images and re-export from elements.
+#[cfg(feature = "images")]
+mod images;
+#[cfg(feature = "images")]
+pub use images::*;
 
 /// Arranges a list of elements sequentially.
 ///
@@ -176,27 +182,6 @@ impl Element for Text {
             result.has_more = true;
         }
         Ok(result)
-    }
-}
-
-/// The alignment of a [`Paragraph`][].
-///
-/// The default alignment is left-flushed.
-///
-/// [`Paragraph`]: struct.Paragraph.html
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Alignment {
-    /// Left-flushed.
-    Left,
-    /// Right-flushed.
-    Right,
-    /// Centered.
-    Center,
-}
-
-impl Default for Alignment {
-    fn default() -> Alignment {
-        Alignment::Left
     }
 }
 

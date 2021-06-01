@@ -31,6 +31,7 @@ SPDX-License-Identifier: CC0-1.0
 - Remove the `Document::set_margins` method (use a `PageDecorator` instead).
 - Replace the `PdfprintError` variant of `ErrorKind` with `PdfError` and
   `PdfIndexError`.
+- Move `Alignment` struct out of `elements` module.
 
 ## Non-Breaking Changes
 
@@ -46,6 +47,7 @@ SPDX-License-Identifier: CC0-1.0
 - Add support for kerning and add the `Font::kerning` and `Font::glyph_ids`
   methods.
 - Add the `error::Context` trait for easier error generation.
+- Adds support for `Image` as a possible insertable element.
 
 ## Bug Fixes
 

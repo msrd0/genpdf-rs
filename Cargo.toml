@@ -20,6 +20,10 @@ readme = "README.md"
 lopdf = "0.26"
 rusttype = "0.8"
 
+[dependencies.image]
+version = "0.23.12"
+optional = true
+
 [dependencies.hyphenation]
 version = "0.8"
 optional = true
@@ -36,6 +40,10 @@ features = ["add", "add_assign", "from", "into", "mul", "mul_assign", "sum"]
 [dev-dependencies.hyphenation]
 version = "0.8"
 features = ["embed_en-us"]
+
+[features]
+default = []
+images = ["image", "printpdf/embedded_images"]
 
 [package.metadata.docs.rs]
 all-features = true
