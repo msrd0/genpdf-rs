@@ -806,6 +806,7 @@ type HeaderCallback = Box<dyn Fn(usize) -> Box<dyn Element>>;
 pub struct SimplePageDecorator {
     page: usize,
     margins: Option<Margins>,
+    outline_thickness: Option<f64>,
     header_cb: Option<HeaderCallback>,
 }
 
@@ -820,6 +821,11 @@ impl SimplePageDecorator {
     /// If this method is not called, the full page is used.
     pub fn set_margins(&mut self, margins: impl Into<Margins>) {
         self.margins = Some(margins.into());
+    }
+
+    /// Sets the outline thickness (i.e. thickness of lines etc.) for all pages of this document.
+    pub fn set_outline_thickness(&mut self, thickness: f64) {
+        self.outline_thickness = Some(thickness);
     }
 
     /// Sets the header generator for this document.
@@ -847,6 +853,9 @@ impl PageDecorator for SimplePageDecorator {
         self.page += 1;
         if let Some(margins) = self.margins {
             area.add_margins(margins);
+        }
+        if let Some(thickness) = self.outline_thickness {
+            area.set_outline_thickness(thickness);
         }
         if let Some(cb) = &self.header_cb {
             let mut element = cb(self.page);
