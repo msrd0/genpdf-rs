@@ -186,6 +186,7 @@ impl Element for LinearLayout {
 pub struct Text {
     text: Vec<StyledString>,
     render_idx: usize,
+    alignment: Alignment,
 }
 
 impl Text {
@@ -199,7 +200,19 @@ impl Text {
         Self {
             text,
             render_idx: 0,
+            alignment: Alignment::Left,
         }
+    }
+
+    /// Sets the alignment of this paragraph.
+    pub fn set_alignment(&mut self, alignment: Alignment) {
+        self.alignment = alignment;
+    }
+
+    /// Sets the alignment of this paragraph and returns the paragraph.
+    pub fn aligned(mut self, alignment: Alignment) -> Self {
+        self.set_alignment(alignment);
+        self
     }
 }
 
@@ -210,6 +223,29 @@ impl Element for Text {
         mut area: render::Area<'_>,
         style: Style,
     ) -> Result<RenderResult, Error> {
+        let styles = self
+            .text
+            .iter()
+            .map(|text| {
+                let mut style = style;
+                style.merge(text.style);
+                style
+            })
+            .collect::<Vec<_>>();
+        let str_width = self
+            .text
+            .iter()
+            .enumerate()
+            .map(|(i, text)| styles[i].str_width(&context.font_cache, &text.s))
+            .collect::<Vec<_>>();
+        let total_width: Mm = str_width.iter().copied().sum();
+
+        match self.alignment {
+            Alignment::Left => {}
+            Alignment::Center => area.add_offset(((area.size().width - total_width) / 2.0, 0)),
+            Alignment::Right => area.add_offset((area.size().width - total_width, 0)),
+        };
+
         let mut result = RenderResult::default();
         for text in self.text.iter().skip(self.render_idx) {
             let mut style = style;
