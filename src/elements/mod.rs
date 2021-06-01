@@ -1136,6 +1136,15 @@ impl<'a> TableLayoutRow<'a> {
     pub fn push(self) -> Result<(), Error> {
         self.table_layout.push_row(self.elements)
     }
+    
+    /// Tries to append this row to the table with custom column weights.
+    ///
+    /// This method fails if the number of elements in this row does not match the number of
+    /// columns in the table, or if the sum of the column weights for this row does not match
+    /// the sum of those of the table.
+    pub fn push_with_column_weights(self, column_weights: Vec<usize>) -> Result<(), Error> {
+        self.table_layout.push_row_with_column_weights(self.elements, column_weights)
+    }
 }
 
 /// Arranges elements in columns and rows.
@@ -1177,6 +1186,7 @@ impl<'a> TableLayoutRow<'a> {
 pub struct TableLayout {
     column_weights: Vec<usize>,
     rows: Vec<Vec<Box<dyn Element>>>,
+    row_column_weights: Vec<Vec<usize>>,
     render_idx: usize,
     cell_decorator: Option<Box<dyn CellDecorator>>,
 }
@@ -1190,6 +1200,7 @@ impl TableLayout {
         TableLayout {
             column_weights,
             rows: Vec::new(),
+            row_column_weights: Vec::new(),
             render_idx: 0,
             cell_decorator: None,
         }
@@ -1209,22 +1220,42 @@ impl TableLayout {
 
     /// Adds a row to this table.
     ///
-    /// The number of elements in the given vector must match the number of columns.  Otherwise, an
+    /// The number of elements in the given vector must match the number of columns. Otherwise, an
     /// error is returned.
     pub fn push_row(&mut self, row: Vec<Box<dyn Element>>) -> Result<(), Error> {
-        if row.len() == self.column_weights.len() {
-            self.rows.push(row);
-            Ok(())
-        } else {
-            Err(Error::new(
+        self.push_row_with_column_weights(row, self.column_weights.clone())
+    }
+    
+    /// Adds a row to this table with differing column weights. This is useful if the row contains
+    /// cells that span multiple columns.
+    ///
+    /// The number of elements in the given vector must match the number of columns, and the sum of
+    /// column weights for table must match the sum of the custom column weights for this row.
+    /// Otherwise, an error is returned.
+    pub fn push_row_with_column_weights(&mut self, row: Vec<Box<dyn Element>>, column_weights: Vec<usize>) -> Result<(), Error> {
+        if row.len() != column_weights.len() {
+            return Err(Error::new(
                 format!(
                     "Expected {} elements in table row, received {}",
                     self.column_weights.len(),
                     row.len()
                 ),
                 ErrorKind::InvalidData,
-            ))
+            ));
         }
+        
+        let row_sum: usize = column_weights.iter().sum();
+        let self_sum: usize = self.column_weights.iter().sum();
+        if row_sum != self_sum {
+            return Err(Error::new(
+                format!("Expected column weights to add up to {}, but they add up to {}", self_sum, row_sum),
+                ErrorKind::InvalidData
+            ));
+        }
+        
+        self.rows.push(row);
+        self.row_column_weights.push(column_weights);
+        Ok(())
     }
 
     fn render_row(
@@ -1235,7 +1266,7 @@ impl TableLayout {
     ) -> Result<RenderResult, Error> {
         let mut result = RenderResult::default();
 
-        let areas = area.split_horizontally(&self.column_weights);
+        let areas = area.split_horizontally(&self.row_column_weights[self.render_idx]);
         let mut row_height = Mm::from(0);
         for (area, element) in areas.iter().zip(self.rows[self.render_idx].iter_mut()) {
             let element_result = element.render(context, area.clone(), style)?;
