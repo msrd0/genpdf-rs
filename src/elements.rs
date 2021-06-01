@@ -56,6 +56,11 @@ use crate::{Alignment, Context, Element, Margins, Mm, Position, RenderResult, Si
 #[cfg(feature = "images")]
 pub use images::Image;
 
+enum Direction {
+    Horizontal,
+    Vertical
+}
+
 /// Arranges a list of elements sequentially.
 ///
 /// Currently, elements can only be arranged vertically.
@@ -79,21 +84,28 @@ pub use images::Image;
 /// ```
 ///
 pub struct LinearLayout {
+    direction: Direction,
     elements: Vec<Box<dyn Element>>,
     render_idx: usize,
 }
 
 impl LinearLayout {
-    fn new() -> LinearLayout {
-        LinearLayout {
+    fn new(direction: Direction) -> Self {
+        Self {
+            direction,
             elements: Vec::new(),
             render_idx: 0,
         }
     }
 
     /// Creates a new linear layout that arranges its elements vertically.
-    pub fn vertical() -> LinearLayout {
-        LinearLayout::new()
+    pub fn vertical() -> Self {
+        Self::new(Direction::Vertical)
+    }
+    
+    /// Creates a new linear layout that arranges its elements horizontally.
+    pub fn horizontal() -> Self {
+        Self::new(Direction::Horizontal)
     }
 
     /// Adds the given element to this layout.
@@ -128,6 +140,28 @@ impl LinearLayout {
         result.has_more = self.render_idx < self.elements.len();
         Ok(result)
     }
+    
+    fn render_horizontal(
+        &mut self,
+        ctx: &Context,
+        mut area: render::Area<'_>,
+        style: Style
+    ) -> Result<RenderResult, Error> {
+        let mut result = RenderResult::default();
+        while area.size().width > Mm(0.0) && self.render_idx < self.elements.len() {
+            let element_result =
+                self.elements[self.render_idx].render(ctx, area.clone(), style)?;
+            area.add_offset(Position::new(element_result.size.width, 0));
+            result.size = result.size.stack_horizontal(element_result.size);
+            if element_result.has_more {
+                result.has_more = true;
+                return Ok(result);
+            }
+            self.render_idx += 1;
+        }
+        result.has_more = self.render_idx < self.elements.len();
+        Ok(result)
+    }
 }
 
 impl Element for LinearLayout {
@@ -137,8 +171,10 @@ impl Element for LinearLayout {
         area: render::Area<'_>,
         style: Style,
     ) -> Result<RenderResult, Error> {
-        // TODO: add horizontal layout
-        self.render_vertical(context, area, style)
+        match self.direction {
+            Direction::Horizontal => self.render_horizontal(context, area, style),
+            Direction::Vertical => self.render_vertical(context, area, style)
+        }
     }
 }
 
