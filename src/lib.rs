@@ -378,7 +378,7 @@ pub struct Scale {
 // Overriding default of (0,0) as that would scale it to 0.
 impl Default for Scale {
     fn default() -> Scale {
-        Scale::new(1,1)
+        Scale::new(1, 1)
     }
 }
 
@@ -426,7 +426,7 @@ impl Size {
         self.height += other.height;
         self
     }
-    
+
     /// Stacks the given size horizontally on this size and returns the result.
     ///
     /// This means that the height is set to the maximum of the heights and the width is set to the

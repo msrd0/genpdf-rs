@@ -86,7 +86,7 @@ impl error::Error for Error {
             ErrorKind::PdfIndexError(err) => Some(err),
             ErrorKind::RusttypeError(err) => Some(err),
 
-            #[cfg(feature = "images",)]
+            #[cfg(feature = "images")]
             ErrorKind::ImageError(err) => Some(err),
         }
     }
@@ -116,7 +116,7 @@ pub enum ErrorKind {
     RusttypeError(rusttype::Error),
 
     /// An error caused by an image.
-    #[cfg(feature = "images",)]
+    #[cfg(feature = "images")]
     ImageError(image::ImageError),
 }
 
@@ -155,7 +155,7 @@ impl From<rusttype::Error> for ErrorKind {
     }
 }
 
-#[cfg(feature = "images",)]
+#[cfg(feature = "images")]
 impl From<image::ImageError> for ErrorKind {
     fn from(error: image::ImageError) -> ErrorKind {
         ErrorKind::ImageError(error)

@@ -56,7 +56,7 @@ pub use images::*;
 
 enum Direction {
     Horizontal,
-    Vertical
+    Vertical,
 }
 
 /// Arranges a list of elements sequentially.
@@ -100,7 +100,7 @@ impl LinearLayout {
     pub fn vertical() -> Self {
         Self::new(Direction::Vertical)
     }
-    
+
     /// Creates a new linear layout that arranges its elements horizontally.
     pub fn horizontal() -> Self {
         Self::new(Direction::Horizontal)
@@ -138,17 +138,16 @@ impl LinearLayout {
         result.has_more = self.render_idx < self.elements.len();
         Ok(result)
     }
-    
+
     fn render_horizontal(
         &mut self,
         ctx: &Context,
         mut area: render::Area<'_>,
-        style: Style
+        style: Style,
     ) -> Result<RenderResult, Error> {
         let mut result = RenderResult::default();
         while area.size().width > Mm(0.0) && self.render_idx < self.elements.len() {
-            let element_result =
-                self.elements[self.render_idx].render(ctx, area.clone(), style)?;
+            let element_result = self.elements[self.render_idx].render(ctx, area.clone(), style)?;
             area.add_offset(Position::new(element_result.size.width, 0));
             result.size = result.size.stack_horizontal(element_result.size);
             if element_result.has_more {
@@ -171,7 +170,7 @@ impl Element for LinearLayout {
     ) -> Result<RenderResult, Error> {
         match self.direction {
             Direction::Horizontal => self.render_horizontal(context, area, style),
-            Direction::Vertical => self.render_vertical(context, area, style)
+            Direction::Vertical => self.render_vertical(context, area, style),
         }
     }
 }
@@ -1136,14 +1135,15 @@ impl<'a> TableLayoutRow<'a> {
     pub fn push(self) -> Result<(), Error> {
         self.table_layout.push_row(self.elements)
     }
-    
+
     /// Tries to append this row to the table with custom column weights.
     ///
     /// This method fails if the number of elements in this row does not match the number of
     /// columns in the table, or if the sum of the column weights for this row does not match
     /// the sum of those of the table.
     pub fn push_with_column_weights(self, column_weights: Vec<usize>) -> Result<(), Error> {
-        self.table_layout.push_row_with_column_weights(self.elements, column_weights)
+        self.table_layout
+            .push_row_with_column_weights(self.elements, column_weights)
     }
 }
 
@@ -1225,14 +1225,18 @@ impl TableLayout {
     pub fn push_row(&mut self, row: Vec<Box<dyn Element>>) -> Result<(), Error> {
         self.push_row_with_column_weights(row, self.column_weights.clone())
     }
-    
+
     /// Adds a row to this table with differing column weights. This is useful if the row contains
     /// cells that span multiple columns.
     ///
     /// The number of elements in the given vector must match the number of columns, and the sum of
     /// column weights for table must match the sum of the custom column weights for this row.
     /// Otherwise, an error is returned.
-    pub fn push_row_with_column_weights(&mut self, row: Vec<Box<dyn Element>>, column_weights: Vec<usize>) -> Result<(), Error> {
+    pub fn push_row_with_column_weights(
+        &mut self,
+        row: Vec<Box<dyn Element>>,
+        column_weights: Vec<usize>,
+    ) -> Result<(), Error> {
         if row.len() != column_weights.len() {
             return Err(Error::new(
                 format!(
@@ -1243,16 +1247,19 @@ impl TableLayout {
                 ErrorKind::InvalidData,
             ));
         }
-        
+
         let row_sum: usize = column_weights.iter().sum();
         let self_sum: usize = self.column_weights.iter().sum();
         if row_sum != self_sum {
             return Err(Error::new(
-                format!("Expected column weights to add up to {}, but they add up to {}", self_sum, row_sum),
-                ErrorKind::InvalidData
+                format!(
+                    "Expected column weights to add up to {}, but they add up to {}",
+                    self_sum, row_sum
+                ),
+                ErrorKind::InvalidData,
             ));
         }
-        
+
         self.rows.push(row);
         self.row_column_weights.push(column_weights);
         Ok(())

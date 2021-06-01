@@ -33,8 +33,7 @@ fn main() {
         let mut layout = elements::LinearLayout::vertical();
         if page > 1 {
             layout.push(
-                elements::Paragraph::new(format!("Page {}", page))
-                    .aligned(Alignment::Center),
+                elements::Paragraph::new(format!("Page {}", page)).aligned(Alignment::Center),
             );
             layout.push(elements::Break::new(1));
         }
@@ -56,7 +55,7 @@ fn main() {
         elements::Image::from_path(IMAGE_PATH_JPG)
             .expect("Unable to load alt image")
             .with_position(genpdf::Position::new(170, -10)) // far over to right and down
-            .with_clockwise_rotation(90.0)
+            .with_clockwise_rotation(90.0),
     );
 
     // adding a break to avoid the image posted above with an "absolute image.
@@ -64,7 +63,7 @@ fn main() {
 
     // IMAGE FILE TYPE HANDLING:
     doc.push(elements::Paragraph::new(
-        "Table with image format/scaling tests:"
+        "Table with image format/scaling tests:",
     ));
     let mut img_table = elements::TableLayout::new(vec![2, 2, 2, 2]);
     img_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
@@ -77,7 +76,9 @@ fn main() {
         .push()
         .expect("Invalid Row.");
     for (ftype, path) in vec![
-        ("BMP", IMAGE_PATH_BMP), ("JPG", IMAGE_PATH_JPG), ("PNG", IMAGE_PATH_PNG)
+        ("BMP", IMAGE_PATH_BMP),
+        ("JPG", IMAGE_PATH_JPG),
+        ("PNG", IMAGE_PATH_PNG),
     ] {
         let img = elements::Image::from_path(path).expect("invalid image");
         img_table
@@ -93,7 +94,7 @@ fn main() {
 
     doc.push(elements::Break::new(2));
     doc.push(elements::Paragraph::new(
-        "Table with image rotation/offset calculation tests:"
+        "Table with image rotation/offset calculation tests:",
     ));
     let mut rot_table = elements::TableLayout::new(vec![2, 2, 2, 2, 2, 2, 2]);
     rot_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
@@ -132,7 +133,6 @@ fn main() {
         .push()
         .expect("Invalid Row.");
     doc.push(rot_table);
-
 
     doc.render_to_file(output_file)
         .expect("Failed to write output file");

@@ -1,11 +1,11 @@
-/// Image support for genpdf-rs.
+//! Image support for genpdf-rs.
 
-use std::path;
 use image::GenericImageView;
+use std::path;
 
-use crate::{Alignment, Context, Element, Mm, Position, RenderResult, Rotation, Scale, Size};
 use crate::error::Error;
 use crate::{render, style};
+use crate::{Alignment, Context, Element, Mm, Position, RenderResult, Rotation, Scale, Size};
 
 /// An Image to embed in the PDF.
 ///
@@ -57,10 +57,10 @@ impl Image {
 
     /// If you have a reader, we can pass that to the image library to pull it in.
     pub fn from_reader<R>(reader: R) -> Result<Self, Error>
-        where
-            R: std::io::BufRead,
-            R: std::io::Read,
-            R: std::io::Seek,
+    where
+        R: std::io::BufRead,
+        R: std::io::Read,
+        R: std::io::Seek,
     {
         let data = image::io::Reader::new(reader)
             .with_guessed_format()
@@ -128,14 +128,15 @@ impl Image {
 
     /// Calculates a guess for the size of the image based on the dpi/pixel-count/scale.
     fn get_size(&self) -> Size {
-        let mmpi: f64 = 25.4; // millimeters per inch
+        // millimeters per inch
+        const MMPI: f64 = 25.4;
         // Assume 300 DPI to be consistent with printpdf.
         let dpi: f64 = self.dpi.unwrap_or(300.0);
         let (px_width, px_height) = self.data.dimensions();
         let (scale_width, scale_height): (f64, f64) = (self.scale.x, self.scale.y);
         Size::new(
-            mmpi * ((scale_width * px_width as f64) / dpi),
-            mmpi * ((scale_height * px_height as f64) / dpi)
+            MMPI * ((scale_width * px_width as f64) / dpi),
+            MMPI * ((scale_height * px_height as f64) / dpi),
         )
     }
 
@@ -168,7 +169,7 @@ impl Element for Image {
         &mut self,
         _context: &Context,
         area: render::Area<'_>,
-        _style: style::Style
+        _style: style::Style,
     ) -> Result<RenderResult, Error> {
         let mut result = RenderResult::default();
         let true_size = self.get_size();
@@ -210,37 +211,39 @@ fn bounding_box_offset_and_size(rotation: &Rotation, size: &Size) -> (Position, 
     let (ct, st) = (theta.cos(), theta.sin());
     let (w, h): (f64, f64) = (size.width.into(), size.height.into());
     match rotation.degrees {
-        d if d >    0.0 && d <=    90.0 => {
+        d if d > 0.0 && d <= 90.0 => {
             let alpha = 180.0 - (rotation.degrees + 90.0);
             let ca = alpha.to_radians().cos();
             let (hct, wct) = (h * ct, w * ct);
             let (hst, wst) = (h * st, w * st);
             let (bb_w, bb_h) = (hst + wct, wst + hct);
             (Position::new(h * ca, bb_h), Size::new(bb_w, bb_h))
-        },
-        d if d >  90.0 && d <=  180.0 => {
+        }
+        d if d > 90.0 && d <= 180.0 => {
             let alpha = (rotation.degrees - 90.0).to_radians();
             let (ca, sa) = (alpha.cos(), alpha.sin());
-            let (bb_w, bb_h) = (w*sa + h*ca, w*ca + h*sa);
-            (Position::new(bb_w, w*ca), Size::new(bb_w, bb_h))
-        },
-        d if d <   0.0 && d >   -90.0 => {
+            let (bb_w, bb_h) = (w * sa + h * ca, w * ca + h * sa);
+            (Position::new(bb_w, w * ca), Size::new(bb_w, bb_h))
+        }
+        d if d < 0.0 && d > -90.0 => {
             let (hct, wct) = (h * ct, w * ct);
             let (hst, wst) = (h * st, w * st);
             let (bb_w, bb_h) = (hst + wct, hct + wst);
             (Position::new(0, hct), Size::new(bb_w, bb_h))
-        },
+        }
         d if d <= -90.0 && d >= -180.0 => {
             let alpha = (180.0 + rotation.degrees).to_radians();
             let (ca, sa) = (alpha.cos(), alpha.sin());
-            let (bb_w, bb_h) = (h*sa + w*ca, h*ca + w*sa);
-            (Position::new(w*ca, 0), Size::new(bb_w, bb_h))
-        },
+            let (bb_w, bb_h) = (h * sa + w * ca, h * ca + w * sa);
+            (Position::new(w * ca, 0), Size::new(bb_w, bb_h))
+        }
         _ =>
         // This section is only for degrees == 0.0, but I use the default match due to:
         //       https://github.com/rust-lang/rust/issues/41620
         // Rotation's degrees should be restricted to [-180,180] so these
         // ranges should be complete.
-            (Position::new(0, h), size.clone()),
+        {
+            (Position::new(0, h), size.clone())
+        }
     }
 }

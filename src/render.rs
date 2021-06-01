@@ -25,7 +25,7 @@ use crate::fonts;
 use crate::style::{Color, Style};
 use crate::{Margins, Mm, Position, Size};
 
-#[cfg(feature = "images",)]
+#[cfg(feature = "images")]
 use crate::{Rotation, Scale};
 
 /// Renders a PDF document with one or more pages.
@@ -278,7 +278,7 @@ impl<'a> Area<'a> {
     pub fn set_height(&mut self, height: Mm) {
         self.size.height = height;
     }
-    
+
     /// Sets the outline thickness (i.e. thickness of lines etc.) of the current layer.
     pub(crate) fn set_outline_thickness(&mut self, thickness: f64) {
         self.layer.layer.set_outline_thickness(thickness);
@@ -311,14 +311,14 @@ impl<'a> Area<'a> {
     /// Your position will need to compensate for rotation/scale/dpi. Using the Image's
     /// render functionality will will do this for you and is the recommended way to
     /// insert an image into an Area.
-    #[cfg(feature = "images",)]
+    #[cfg(feature = "images")]
     pub fn add_image(
         &self,
         image: &image::DynamicImage,
         position: Position,
         scale: Scale,
         rotation: Rotation,
-        dpi: Option<f64>
+        dpi: Option<f64>,
     ) {
         let dynamic_image = printpdf::Image::from_dynamic_image(image);
         let real_position = self.transform_position(position);
