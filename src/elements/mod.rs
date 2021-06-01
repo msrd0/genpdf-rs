@@ -149,8 +149,8 @@ impl LinearLayout {
         while area.size().width > Mm(0.0) && self.render_idx < self.elements.len() {
             let element_result =
                 self.elements[self.render_idx].render(ctx, area.clone(), style)?;
-            area.add_offset(dbg!(Position::new(element_result.size.width, 0)));
-            result.size = dbg!(result.size.stack_horizontal(element_result.size));
+            area.add_offset(Position::new(element_result.size.width, 0));
+            result.size = result.size.stack_horizontal(element_result.size);
             if element_result.has_more {
                 result.has_more = true;
                 return Ok(result);
