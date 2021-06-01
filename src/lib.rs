@@ -426,6 +426,17 @@ impl Size {
         self.height += other.height;
         self
     }
+    
+    /// Stacks the given size horizontally on this size and returns the result.
+    ///
+    /// This means that the height is set to the maximum of the heights and the width is set to the
+    /// sum of the widths.
+    #[must_use]
+    pub fn stack_horizontal(mut self, other: Size) -> Size {
+        self.height = self.height.max(other.height);
+        self.width += other.width;
+        self
+    }
 }
 
 impl<W: Into<Mm>, H: Into<Mm>> From<(W, H)> for Size {
