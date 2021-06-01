@@ -186,13 +186,22 @@ impl Element for LinearLayout {
 /// [`Paragraph`]: struct.Paragraph.html
 #[derive(Clone, Debug, Default)]
 pub struct Text {
-    text: StyledString,
+    text: Vec<StyledString>,
+    render_idx: usize,
 }
 
 impl Text {
     /// Creates a new instance with the given styled string.
-    pub fn new(text: impl Into<StyledString>) -> Text {
-        Text { text: text.into() }
+    pub fn new(text: impl Into<StyledString>) -> Self {
+        Self::from_vec(vec![text.into()])
+    }
+
+    /// Creates a new instance with several styled strings.
+    pub fn from_vec(text: Vec<StyledString>) -> Self {
+        Self {
+            text,
+            render_idx: 0,
+        }
     }
 }
 
@@ -200,23 +209,24 @@ impl Element for Text {
     fn render(
         &mut self,
         context: &Context,
-        area: render::Area<'_>,
-        mut style: Style,
+        mut area: render::Area<'_>,
+        style: Style,
     ) -> Result<RenderResult, Error> {
         let mut result = RenderResult::default();
-        style.merge(self.text.style);
-        if area.print_str(
-            &context.font_cache,
-            Position::default(),
-            style,
-            &self.text.s,
-        )? {
-            result.size = Size::new(
-                style.str_width(&context.font_cache, &self.text.s),
-                style.line_height(&context.font_cache),
-            );
-        } else {
-            result.has_more = true;
+        for text in self.text.iter().skip(self.render_idx) {
+            let mut style = style;
+            style.merge(text.style);
+            if area.print_str(&context.font_cache, Position::default(), style, &text.s)? {
+                let width = style.str_width(&context.font_cache, &text.s);
+                result.size = result
+                    .size
+                    .stack_horizontal(Size::new(width, style.line_height(&context.font_cache)));
+                area.add_offset((width, 0));
+            } else {
+                result.has_more = true;
+                return Ok(result);
+            }
+            self.render_idx += 1;
         }
         Ok(result)
     }
