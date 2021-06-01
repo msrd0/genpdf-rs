@@ -153,6 +153,8 @@
 
 #![warn(missing_docs, rust_2018_idioms)]
 
+pub use printpdf::PdfConformance;
+
 mod wrap;
 
 pub mod elements;
@@ -578,7 +580,7 @@ pub struct Document {
     style: style::Style,
     paper_size: Size,
     decorator: Option<Box<dyn PageDecorator>>,
-    conformance: Option<printpdf::PdfConformance>,
+    conformance: Option<PdfConformance>,
 }
 
 impl Document {
@@ -671,7 +673,7 @@ impl Document {
     }
 
     /// Sets the PDF conformance settings for this document.
-    pub fn set_conformance(&mut self, conformance: printpdf::PdfConformance) {
+    pub fn set_conformance(&mut self, conformance: PdfConformance) {
         self.conformance = Some(conformance);
     }
 
@@ -680,13 +682,11 @@ impl Document {
     /// If this method is called, the generation of ICC profiles and XMP metadata is deactivated,
     /// leading to a smaller file size.
     pub fn set_minimal_conformance(&mut self) {
-        self.set_conformance(printpdf::PdfConformance::Custom(
-            printpdf::CustomPdfConformance {
-                requires_icc_profile: false,
-                requires_xmp_metadata: false,
-                ..Default::default()
-            },
-        ));
+        self.set_conformance(PdfConformance::Custom(printpdf::CustomPdfConformance {
+            requires_icc_profile: false,
+            requires_xmp_metadata: false,
+            ..Default::default()
+        }));
     }
 
     /// Adds the given element to the document.
