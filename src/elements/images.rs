@@ -198,6 +198,7 @@ impl Element for Image {
         let (bb_origin, bb_size) = bounding_box_offset_and_size(&self.rotation, &true_size);
 
         let mut position: Position = if let Some(position) = self.position {
+            result.size = bb_size + Size::from((position.x, position.y));
             position
         } else {
             // Update the result size to be based on the bounding-box size/offset.
