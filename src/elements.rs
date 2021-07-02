@@ -177,6 +177,45 @@ impl Element for LinearLayout {
     }
 }
 
+/// A horizontal line. Covers the entire text width. Can have a top/bottom margin.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HorizontalLine {
+    margin: Mm,
+}
+
+impl HorizontalLine {
+    /// Create a new horizontal line with no top/bottom margin.
+    pub fn new() -> Self {
+        Self::with_margin(Mm(0.0))
+    }
+
+    /// Create a new horizontal line with the specified top/bottom margin.
+    pub fn with_margin(margin: Mm) -> Self {
+        Self { margin }
+    }
+}
+
+impl Element for HorizontalLine {
+    fn render(
+        &mut self,
+        _: &Context,
+        area: render::Area<'_>,
+        style: Style,
+    ) -> Result<RenderResult, crate::error::Error> {
+        let mut result = RenderResult::default();
+        let width = area.size().width;
+        area.draw_line(
+            vec![
+                Position::new(0, self.margin),
+                Position::new(width, self.margin),
+            ],
+            style,
+        );
+        result.size += Size::new(width, self.margin * 2.0);
+        Ok(result)
+    }
+}
+
 /// A single line of formatted text.
 ///
 /// This element renders a single styled string on a single line.  It does not wrap it if the
