@@ -1,9 +1,9 @@
-# SPDX-FileCopyrightText: 2020 Robin Krahl <robin.krahl@ireas.org>
+# SPDX-FileCopyrightText: 2020-2021 Robin Krahl <robin.krahl@ireas.org>
 # SPDX-License-Identifier: CC0-1.0
 
 [package]
 name = "genpdf"
-version = "0.2.0-alpha.0"
+version = "0.2.0"
 authors = ["Robin Krahl <robin.krahl@ireas.org>"]
 edition = "2018"
 description = "User-friendly PDF generator written in pure Rust"
@@ -41,6 +41,11 @@ default-features = false
 version = "0.99"
 default-features = false
 features = ["add", "add_assign", "from", "into", "mul", "mul_assign", "sum"]
+
+[dev-dependencies.float-cmp]
+version = "0.8"
+default-features = false
+features = ["std"]
 
 [dev-dependencies.hyphenation]
 version = "0.8"

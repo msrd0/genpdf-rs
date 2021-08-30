@@ -1,9 +1,66 @@
 <!---
-SPDX-FileCopyrightText: 2020 Robin Krahl <robin.krahl@ireas.org>
+SPDX-FileCopyrightText: 2020-2021 Robin Krahl <robin.krahl@ireas.org>
 SPDX-License-Identifier: CC0-1.0
 -->
 
 # Unreleased
+
+## Breaking Changes
+
+- Introduce the `IntoBoxedElement` trait and use it for the `push` and
+  `element` methods of `Document`, `LinearLayout` and `TableLayoutRow`.
+- Support setting the line thickness and color for `FramedElement` and
+  `FrameCellDecorator`:
+  - Add the `LineStyle` struct.
+  - Add the `FramedElement::with_line_style` and
+    `FrameCellDecorator::with_line_style` constructors.
+  - Remove the `style` argument from `CellDecorator::decorate_cell`.
+  - Change the `Style` argument for `Area::draw_line` to `LineStyle`.
+  - Change `Element::framed` to take the line style as an argument.
+  - Add the `prepare_cell` method to `CellDecorator`.
+  - Add the `row_height` argument to `CellDecorator::decorate_cell` and make it
+    return the total row height.
+- Fix the line height calculations for multi-style paragraphs:
+  - Introduce the `fonts::Metrics` struct and the `Font::metrics` and
+    `Style::metrics` methods.
+  - Calculate the maximum line metrics in `Paragraph::render`.
+  - Change `Area::text_section` to take `Metrics` instead of `Style`.
+- Refactor the `render` module:
+  - Change the `Layer`, `Area` and `TextSection` lifetimes.
+  - Store a reference to the current `Page` in `Layer`.
+  - Accept a point iterator instead of a point vector in `Area::draw_line`.
+- Remove the `From<Position>` implementation for `printpdf::Point`.
+
+## Non-Breaking Changes
+
+- Implement `std::iter::Extend` for `Document`, `LinearLayout`,
+  `UnorderedList`, `OrderedList` and `TableLayoutRow`.
+- Implement `std::iter::FromIterator` for `UnorderedList` and `OrderedList`.
+- Add the `minimal` example that produces a minimal PDF document.
+- Add the `Layer::next` and `Area::next_layer` methods for accessing the next
+  layer of a page.
+- Remove left bearing from the first character of a string for consistent
+  alignment with different font sizes.
+- Add `set_creation_date` and `set_modification_date` methods to `Document` and
+  `with_creation_date` and `with_modification_date` to `Renderer`.
+- Add basic test suite.
+- Add the `UserSpacePosition` and `LayerPosition` structs to the `render`
+  module.
+- Cache per-layer settings (fill color, outline color, outline thickness) and
+  per-text-section settings (font family and size).
+
+## Bug Fixes
+
+- Return an error if a paragraph overflows.
+- Use the ascent instead of the glyph height for vertical positioning of text.
+
+# v0.2.0 (2021-06-17)
+
+This release improves the font handling, adds support for embedding images and
+contains many small improvements and bugfixes.
+
+Thanks to Alexander Dean-Kennedy for implementing the images support and to
+Scott Steele for contributing a bug fix.
 
 ## Breaking Changes
 

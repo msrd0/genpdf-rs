@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 Robin Krahl <robin.krahl@ireas.org>
+// SPDX-FileCopyrightText: 2020-2021 Robin Krahl <robin.krahl@ireas.org>
 // SPDX-License-Identifier: Apache-2.0 or MIT
 
 //! Elements of a PDF document.
@@ -48,8 +48,9 @@ use std::iter;
 use std::mem;
 
 use crate::error::{Error, ErrorKind};
+use crate::fonts;
 use crate::render;
-use crate::style::{Style, StyledString};
+use crate::style::{LineStyle, Style, StyledString};
 use crate::wrap;
 use crate::{Alignment, Context, Element, Margins, Mm, Position, RenderResult, Size};
 
@@ -59,6 +60,24 @@ pub use images::Image;
 enum Direction {
     Horizontal,
     Vertical,
+}
+
+/// Helper trait for creating boxed elements.
+pub trait IntoBoxedElement {
+    /// Creates a boxed element from this element.
+    fn into_boxed_element(self) -> Box<dyn Element>;
+}
+
+impl<E: Element + 'static> IntoBoxedElement for E {
+    fn into_boxed_element(self) -> Box<dyn Element> {
+        Box::new(self)
+    }
+}
+
+impl IntoBoxedElement for Box<dyn Element> {
+    fn into_boxed_element(self) -> Box<dyn Element> {
+        self
+    }
 }
 
 /// Arranges a list of elements sequentially.
@@ -109,12 +128,12 @@ impl LinearLayout {
     }
 
     /// Adds the given element to this layout.
-    pub fn push<E: Element + 'static>(&mut self, element: E) {
-        self.elements.push(Box::new(element));
+    pub fn push<E: IntoBoxedElement>(&mut self, element: E) {
+        self.elements.push(element.into_boxed_element());
     }
 
     /// Adds the given element to this layout and it returns the layout.
-    pub fn element<E: Element + 'static>(mut self, element: E) -> Self {
+    pub fn element<E: IntoBoxedElement>(mut self, element: E) -> Self {
         self.push(element);
         self
     }
@@ -200,7 +219,7 @@ impl Element for HorizontalLine {
         &mut self,
         _: &Context,
         area: render::Area<'_>,
-        style: Style,
+        _: Style,
     ) -> Result<RenderResult, crate::error::Error> {
         let mut result = RenderResult::default();
         let width = area.size().width;
@@ -209,10 +228,17 @@ impl Element for HorizontalLine {
                 Position::new(0, self.margin),
                 Position::new(width, self.margin),
             ],
-            style,
+            LineStyle::new(),
         );
         result.size += Size::new(width, self.margin * 2.0);
         Ok(result)
+    }
+}
+
+impl<E: IntoBoxedElement> iter::Extend<E> for LinearLayout {
+    fn extend<I: IntoIterator<Item = E>>(&mut self, iter: I) {
+        self.elements
+            .extend(iter.into_iter().map(|e| e.into_boxed_element()))
     }
 }
 
@@ -317,9 +343,7 @@ impl Element for Text {
 /// strings to this paragraph.  Besides the styling of the text (see [`Style`][]), you can also set
 /// an [`Alignment`][] for the paragraph.
 ///
-/// Note that the line height and spacing is currently calculated based on the style of the entire
-/// paragraph.  If the font family or font size is changed in the [`Style`][] settings for a
-/// string, the line height and spacing might be incorrect.
+/// The line height and spacing are calculated based on the style of each string.
 ///
 /// # Examples
 ///
@@ -345,6 +369,7 @@ impl Element for Text {
 ///
 /// [`Style`]: ../style/struct.Style.html
 /// [`Alignment`]: ../enum.Alignment.html
+/// [`Element::styled`]: ../trait.Element.html#method.styled
 /// [`push`]: #method.push
 /// [`push_styled`]: #method.push_styled
 /// [`string`]: #method.string
@@ -435,14 +460,19 @@ impl Element for Paragraph {
             self.words = wrap::Words::new(mem::take(&mut self.text)).collect();
         }
 
-        let height = style.line_height(&context.font_cache);
         let words = self.words.iter().map(Into::into);
         let mut rendered_len = 0;
-        for (line, delta) in wrap::Wrapper::new(words, context, area.size().width) {
+        let mut wrapper = wrap::Wrapper::new(words, context, area.size().width);
+        for (line, delta) in &mut wrapper {
             let width = line.iter().map(|s| s.width(&context.font_cache)).sum();
+            // Calculate the maximum line height
+            let metrics = line
+                .iter()
+                .map(|s| s.style.metrics(&context.font_cache))
+                .fold(fonts::Metrics::default(), |max, m| max.max(&m));
             let position = Position::new(self.get_offset(width, area.size().width), 0);
-            // TODO: calculate the maximum line height
-            if let Some(mut section) = area.text_section(&context.font_cache, position, style) {
+
+            if let Some(mut section) = area.text_section(&context.font_cache, position, metrics) {
                 for s in line {
                     section.print_str(&s.s, s.style)?;
                     rendered_len += s.s.len();
@@ -452,8 +482,17 @@ impl Element for Paragraph {
                 result.has_more = true;
                 break;
             }
-            result.size = result.size.stack_vertical(Size::new(width, height));
-            area.add_offset(Position::new(0, height));
+            result.size = result
+                .size
+                .stack_vertical(Size::new(width, metrics.line_height));
+            area.add_offset(Position::new(0, metrics.line_height));
+        }
+
+        if wrapper.has_overflowed() {
+            return Err(Error::new(
+                "Page overflowed while trying to wrap a string",
+                ErrorKind::PageSizeExceeded,
+            ));
         }
 
         // Remove the rendered data from self.words so that we don’t render it again on the next
@@ -490,7 +529,7 @@ impl<T: Into<StyledString>> iter::Extend<T> for Paragraph {
 }
 
 impl<T: Into<StyledString>> iter::FromIterator<T> for Paragraph {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Paragraph {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut paragraph = Paragraph::default();
         paragraph.extend(iter);
         paragraph
@@ -706,8 +745,8 @@ impl<E: Element> Element for StyledElement<E> {
 ///
 /// Using [`Element::framed`][]:
 /// ```
-/// use genpdf::{elements, Element as _};
-/// let p = elements::Paragraph::new("text").framed();
+/// use genpdf::{elements, style, Element as _};
+/// let p = elements::Paragraph::new("text").framed(style::LineStyle::new());
 /// ```
 ///
 /// [`Element::framed`]: ../trait.Element.html#method.framed
@@ -715,14 +754,22 @@ impl<E: Element> Element for StyledElement<E> {
 pub struct FramedElement<E: Element> {
     element: E,
     is_first: bool,
+    line_style: LineStyle,
 }
 
 impl<E: Element> FramedElement<E> {
     /// Creates a new framed element that wraps the given element.
     pub fn new(element: E) -> FramedElement<E> {
-        FramedElement {
-            element,
+        FramedElement::with_line_style(element, LineStyle::new())
+    }
+
+    /// Creates a new framed element that wraps the given element,
+    /// and with the given line style.
+    pub fn with_line_style(element: E, line_style: impl Into<LineStyle>) -> FramedElement<E> {
+        Self {
             is_first: true,
+            element,
+            line_style: line_style.into(),
         }
     }
 }
@@ -734,34 +781,61 @@ impl<E: Element> Element for FramedElement<E> {
         area: render::Area<'_>,
         style: Style,
     ) -> Result<RenderResult, Error> {
-        let result = self.element.render(context, area.clone(), style)?;
-        area.draw_line(
-            vec![Position::default(), Position::new(0, result.size.height)],
-            style,
-        );
-        area.draw_line(
-            vec![
-                Position::new(area.size().width, 0),
-                Position::new(area.size().width, result.size.height),
-            ],
-            style,
-        );
+        // For the element area calculations, we have to take into account the full line thickness.
+        // For the frame area, we only need half because we specify the center of the line.
+        let line_thickness = self.line_style.thickness();
+        let line_offset = line_thickness / 2.0;
+
+        // Calculate the areas in which to draw the element and the frame.
+        let mut element_area = area.clone();
+        let mut frame_area = area.clone();
+        element_area.add_margins(Margins::trbl(
+            0,
+            line_thickness,
+            line_thickness,
+            line_thickness,
+        ));
+        frame_area.add_margins(Margins::trbl(0, line_offset, 0, line_offset));
         if self.is_first {
-            area.draw_line(
-                vec![Position::default(), Position::new(area.size().width, 0)],
-                style,
+            element_area.add_margins(Margins::trbl(line_thickness, 0, 0, 0));
+            frame_area.add_margins(Margins::trbl(line_offset, 0, 0, 0));
+        }
+
+        // Draw the element.
+        let mut result = self.element.render(context, element_area, style)?;
+        result.size.width = area.size().width;
+        if result.has_more {
+            frame_area.set_height(result.size.height + line_offset);
+        } else {
+            frame_area.set_height(result.size.height + line_thickness);
+        }
+
+        // Draw the frame.
+        let top_left = Position::default();
+        let top_right = Position::new(frame_area.size().width, 0);
+        let bottom_left = Position::new(0, frame_area.size().height);
+        let bottom_right = Position::new(frame_area.size().width, frame_area.size().height);
+
+        if self.is_first {
+            result.size.height += line_thickness;
+            frame_area.draw_line(
+                vec![bottom_right, top_right, top_left, bottom_left],
+                self.line_style,
             );
         }
         if !result.has_more {
-            area.draw_line(
-                vec![
-                    Position::new(0, result.size.height),
-                    Position::new(area.size().width, result.size.height),
-                ],
-                style,
+            result.size.height += line_thickness;
+            frame_area.draw_line(
+                vec![top_left, bottom_left, bottom_right, top_right],
+                self.line_style,
             );
+        } else {
+            frame_area.draw_line(vec![top_left, bottom_left], self.line_style);
+            frame_area.draw_line(vec![top_right, bottom_right], self.line_style);
         }
+
         self.is_first = false;
+
         Ok(result)
     }
 }
@@ -796,6 +870,27 @@ impl<E: Element> Element for FramedElement<E> {
 ///     .element(elements::Paragraph::new("second"))
 ///     .element(elements::Paragraph::new("third"));
 /// ```
+///
+/// Nested list using a [`LinearLayout`][]:
+/// ```
+/// use genpdf::elements;
+/// let list = elements::UnorderedList::new()
+///     .element(
+///         elements::OrderedList::new()
+///             .element(elements::Paragraph::new("Sublist with bullet point"))
+///     )
+///     .element(
+///         elements::LinearLayout::vertical()
+///             .element(elements::Paragraph::new("Sublist without bullet point:"))
+///             .element(
+///                 elements::OrderedList::new()
+///                     .element(elements::Paragraph::new("first"))
+///                     .element(elements::Paragraph::new("second"))
+///             )
+///     );
+/// ```
+///
+/// [`LinearLayout`]: struct.LinearLayout.html
 pub struct UnorderedList {
     layout: LinearLayout,
     bullet: Option<String>,
@@ -851,6 +946,22 @@ impl Default for UnorderedList {
     }
 }
 
+impl<E: Element + 'static> iter::Extend<E> for UnorderedList {
+    fn extend<I: IntoIterator<Item = E>>(&mut self, iter: I) {
+        for element in iter {
+            self.push(element);
+        }
+    }
+}
+
+impl<E: Element + 'static> iter::FromIterator<E> for UnorderedList {
+    fn from_iter<I: IntoIterator<Item = E>>(iter: I) -> Self {
+        let mut list = Self::default();
+        list.extend(iter);
+        list
+    }
+}
+
 /// An ordered list of elements with arabic numbers.
 ///
 /// # Examples
@@ -881,6 +992,27 @@ impl Default for UnorderedList {
 ///     .element(elements::Paragraph::new("second"))
 ///     .element(elements::Paragraph::new("third"));
 /// ```
+///
+/// Nested list using a [`LinearLayout`][]:
+/// ```
+/// use genpdf::elements;
+/// let list = elements::OrderedList::new()
+///     .element(
+///         elements::UnorderedList::new()
+///             .element(elements::Paragraph::new("Sublist with number"))
+///     )
+///     .element(
+///         elements::LinearLayout::vertical()
+///             .element(elements::Paragraph::new("Sublist without number:"))
+///             .element(
+///                 elements::UnorderedList::new()
+///                     .element(elements::Paragraph::new("first"))
+///                     .element(elements::Paragraph::new("second"))
+///             )
+///     );
+/// ```
+///
+/// [`LinearLayout`]: struct.LinearLayout.html
 pub struct OrderedList {
     layout: LinearLayout,
     number: usize,
@@ -929,6 +1061,22 @@ impl Element for OrderedList {
 impl Default for OrderedList {
     fn default() -> OrderedList {
         OrderedList::new()
+    }
+}
+
+impl<E: Element + 'static> iter::Extend<E> for OrderedList {
+    fn extend<I: IntoIterator<Item = E>>(&mut self, iter: I) {
+        for element in iter {
+            self.push(element);
+        }
+    }
+}
+
+impl<E: Element + 'static> iter::FromIterator<E> for OrderedList {
+    fn from_iter<I: IntoIterator<Item = E>>(iter: I) -> Self {
+        let mut list = Self::default();
+        list.extend(iter);
+        list
     }
 }
 
@@ -1015,22 +1163,36 @@ impl<E: Element> Element for BulletPoint<E> {
 pub trait CellDecorator {
     /// Sets the size of the table.
     ///
-    /// This function is called once before the first call to [`decorate_cell`][].
+    /// This function is called once before the first call to [`prepare_cell`][] or
+    /// [`decorate_cell`][].
     ///
+    /// [`prepare_cell`]: #tymethod.prepare_cell
     /// [`decorate_cell`]: #tymethod.decorate_cell
     fn set_table_size(&mut self, num_columns: usize, num_rows: usize) {
         let _ = (num_columns, num_rows);
     }
 
-    /// Styles the cell with the given indizes thas has been rendered within the given area.
+    /// Prepares the cell with the given indizes and returns the area for rendering the cell.
+    fn prepare_cell<'p>(
+        &self,
+        column: usize,
+        row: usize,
+        area: render::Area<'p>,
+    ) -> render::Area<'p> {
+        let _ = (column, row);
+        area
+    }
+
+    /// Styles the cell with the given indizes thas has been rendered within the given area and the
+    /// given row height and return the total row height.
     fn decorate_cell(
         &mut self,
         column: usize,
         row: usize,
         has_more: bool,
         area: render::Area<'_>,
-        style: Style,
-    );
+        row_height: Mm,
+    ) -> Mm;
 }
 
 /// A cell decorator that draws frames around table cells.
@@ -1045,6 +1207,7 @@ pub struct FrameCellDecorator {
     inner: bool,
     outer: bool,
     cont: bool,
+    line_style: LineStyle,
     num_columns: usize,
     num_rows: usize,
     last_row: Option<usize>,
@@ -1062,6 +1225,22 @@ impl FrameCellDecorator {
         }
     }
 
+    /// Creates a new frame cell decorator with the given border settings, as well as a line style.
+    pub fn with_line_style(
+        inner: bool,
+        outer: bool,
+        cont: bool,
+        line_style: impl Into<LineStyle>,
+    ) -> FrameCellDecorator {
+        Self {
+            inner,
+            outer,
+            cont,
+            line_style: line_style.into(),
+            ..Default::default()
+        }
+    }
+
     fn print_left(&self, column: usize) -> bool {
         if column == 0 {
             self.outer
@@ -1074,7 +1253,7 @@ impl FrameCellDecorator {
         if column + 1 == self.num_columns {
             self.outer
         } else {
-            self.inner
+            false
         }
     }
 
@@ -1096,7 +1275,7 @@ impl FrameCellDecorator {
         } else if row + 1 == self.num_rows {
             self.outer
         } else {
-            self.inner
+            false
         }
     }
 }
@@ -1107,53 +1286,119 @@ impl CellDecorator for FrameCellDecorator {
         self.num_rows = num_rows;
     }
 
+    fn prepare_cell<'p>(
+        &self,
+        column: usize,
+        row: usize,
+        mut area: render::Area<'p>,
+    ) -> render::Area<'p> {
+        let margin = self.line_style.thickness();
+        let margins = Margins::trbl(
+            if self.print_top(row) {
+                margin
+            } else {
+                0.into()
+            },
+            if self.print_right(column) {
+                margin
+            } else {
+                0.into()
+            },
+            if self.print_bottom(row, false) {
+                margin
+            } else {
+                0.into()
+            },
+            if self.print_left(column) {
+                margin
+            } else {
+                0.into()
+            },
+        );
+        area.add_margins(margins);
+        area
+    }
+
     fn decorate_cell(
         &mut self,
         column: usize,
         row: usize,
         has_more: bool,
         area: render::Area<'_>,
-        style: Style,
-    ) {
+        row_height: Mm,
+    ) -> Mm {
+        let print_top = self.print_top(row);
+        let print_bottom = self.print_bottom(row, has_more);
+        let print_left = self.print_left(column);
+        let print_right = self.print_right(column);
+
         let size = area.size();
+        let line_offset = self.line_style.thickness() / 2.0;
 
-        if self.print_left(column) {
-            area.draw_line(
-                vec![Position::default(), Position::new(0, size.height)],
-                style,
-            );
-        }
+        let left = Mm::from(0);
+        let right = size.width;
+        let top = Mm::from(0);
+        let bottom = row_height
+            + if print_bottom {
+                self.line_style.thickness()
+            } else {
+                0.into()
+            }
+            + if print_top {
+                self.line_style.thickness()
+            } else {
+                0.into()
+            };
 
-        if self.print_right(column) {
-            area.draw_line(
-                vec![
-                    Position::new(size.width, 0),
-                    Position::new(size.width, size.height),
-                ],
-                style,
-            );
-        }
+        let mut total_height = row_height;
 
-        if self.print_top(row) {
-            area.draw_line(
-                vec![Position::default(), Position::new(size.width, 0)],
-                style,
-            );
-        }
-
-        if self.print_bottom(row, has_more) {
+        if print_top {
             area.draw_line(
                 vec![
-                    Position::new(0, size.height),
-                    Position::new(size.width, size.height),
+                    Position::new(left, top + line_offset),
+                    Position::new(right, top + line_offset),
                 ],
-                style,
+                self.line_style,
+            );
+            total_height += self.line_style.thickness();
+        }
+
+        if print_right {
+            area.draw_line(
+                vec![
+                    Position::new(right - line_offset, top),
+                    Position::new(right - line_offset, bottom),
+                ],
+                self.line_style,
+            );
+        }
+
+        if print_bottom {
+            area.draw_line(
+                vec![
+                    Position::new(left, bottom - line_offset),
+                    Position::new(right, bottom - line_offset),
+                ],
+                self.line_style,
+            );
+            total_height += self.line_style.thickness();
+        }
+
+        if print_left {
+            area.draw_line(
+                vec![
+                    Position::new(left + line_offset, top),
+                    Position::new(left + line_offset, bottom),
+                ],
+                self.line_style,
             );
         }
 
         if column + 1 == self.num_columns {
             self.last_row = Some(row);
         }
+
+        total_height
     }
 }
 
@@ -1204,13 +1449,13 @@ impl<'a> TableLayoutRow<'a> {
     }
 
     /// Adds the given element to this row.
-    pub fn push_element<E: Element + 'static>(&mut self, element: E) {
-        self.elements.push(Box::new(element));
+    pub fn push_element<E: IntoBoxedElement>(&mut self, element: E) {
+        self.elements.push(element.into_boxed_element());
     }
 
     /// Adds the given element to this row and returns the row.
     #[must_use]
-    pub fn element<E: Element + 'static>(mut self, element: E) -> Self {
+    pub fn element<E: IntoBoxedElement>(mut self, element: E) -> Self {
         self.push_element(element);
         self
     }
@@ -1231,6 +1476,13 @@ impl<'a> TableLayoutRow<'a> {
     pub fn push_with_column_weights(self, column_weights: Vec<usize>) -> Result<(), Error> {
         self.table_layout
             .push_row_with_column_weights(self.elements, column_weights)
+    }
+}
+
+impl<'a, E: IntoBoxedElement> iter::Extend<E> for TableLayoutRow<'a> {
+    fn extend<I: IntoIterator<Item = E>>(&mut self, iter: I) {
+        self.elements
+            .extend(iter.into_iter().map(|e| e.into_boxed_element()))
     }
 }
 
@@ -1361,8 +1613,18 @@ impl TableLayout {
         let mut result = RenderResult::default();
 
         let areas = area.split_horizontally(&self.row_column_weights[self.render_idx]);
+        let cell_areas = if let Some(decorator) = &self.cell_decorator {
+            areas
+                .iter()
+                .enumerate()
+                .map(|(i, area)| decorator.prepare_cell(i, self.render_idx, area.clone()))
+                .collect()
+        } else {
+            areas.clone()
+        };
+
         let mut row_height = Mm::from(0);
-        for (area, element) in areas.iter().zip(self.rows[self.render_idx].iter_mut()) {
+        for (area, element) in cell_areas.iter().zip(self.rows[self.render_idx].iter_mut()) {
             let element_result = element.render(context, area.clone(), style)?;
             result.has_more |= element_result.has_more;
             row_height = row_height.max(element_result.size.height);
@@ -1370,9 +1632,10 @@ impl TableLayout {
         result.size.height = row_height;
 
         if let Some(decorator) = &mut self.cell_decorator {
-            for (i, mut area) in areas.into_iter().enumerate() {
-                area.set_height(row_height);
-                decorator.decorate_cell(i, self.render_idx, result.has_more, area, style);
+            for (i, area) in areas.into_iter().enumerate() {
+                let height =
+                    decorator.decorate_cell(i, self.render_idx, result.has_more, area, row_height);
+                result.size.height = result.size.height.max(height);
             }
         }
 
