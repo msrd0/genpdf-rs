@@ -254,6 +254,17 @@ impl Style {
             .char_width(font_cache, c, self.font_size())
     }
 
+    /// Returns the width of the empty space between the origin of the glyph bounding
+    /// box and the leftmost edge of the character, for this style using the given font cache.
+    ///
+    /// If the font family is set, it must have been created by the given [`FontCache`][].
+    ///
+    /// [`FontCache`]: ../fonts/struct.FontCache.html
+    pub fn char_left_side_bearing(&self, font_cache: &fonts::FontCache, c: char) -> Mm {
+        self.font(font_cache)
+            .char_left_side_bearing(font_cache, c, self.font_size())
+    }
+
     /// Calculates the width of the given string with this style using the data in the given font
     /// cache.
     ///
@@ -293,6 +304,17 @@ impl Style {
     /// [`FontCache`]: ../fonts/struct.FontCache.html
     pub fn line_height(&self, font_cache: &fonts::FontCache) -> Mm {
         self.font(font_cache).get_line_height(self.font_size()) * self.line_spacing()
+    }
+
+    /// Calculate the metrics of the font for this style using the data in the given font cache.
+    ///
+    /// If the font family is set, it must have been created by the given [`FontCache`][].
+    ///
+    /// [`FontCache`]: ../fonts/struct.FontCache.html
+    pub fn metrics(&self, font_cache: &fonts::FontCache) -> fonts::Metrics {
+        let mut metrics = self.font(font_cache).metrics(self.font_size());
+        metrics.line_height *= self.line_spacing();
+        metrics
     }
 }
 
@@ -526,5 +548,84 @@ impl<'s> From<&'s StyledString> for StyledCow<'s> {
 impl<'s> From<StyledString> for StyledCow<'s> {
     fn from(s: StyledString) -> StyledCow<'s> {
         StyledCow::new(s.s, s.style)
+    }
+}
+
+/// A style for a line, used in styling borders and shapes.
+///
+/// The style consists of:
+/// - the line thickness in millimeters (defaults to 0.1)
+/// - the color of the line, see [`Color`][] (defaults to black)
+///
+/// Note that a line thickness of 0.0 does not make the line disappear, but rather makes it appear
+/// 1px wide across all devices and resolutions.
+///
+/// [`Color`]: enum.Color.html
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineStyle {
+    thickness: Mm,
+    color: Color,
+}
+
+impl Default for LineStyle {
+    fn default() -> LineStyle {
+        LineStyle {
+            thickness: Mm::from(0.1),
+            color: Color::Rgb(0, 0, 0),
+        }
+    }
+}
+
+impl From<Color> for LineStyle {
+    fn from(color: Color) -> LineStyle {
+        LineStyle {
+            color,
+            ..LineStyle::default()
+        }
+    }
+}
+
+impl LineStyle {
+    /// Creates a new line style with default values.
+    pub fn new() -> LineStyle {
+        LineStyle::default()
+    }
+
+    /// Sets the line thickness.
+    ///
+    /// Setting this to 0.0 will not hide the line, rather it’s a special value that tells PDF
+    /// viewers to render the line as 1px regardless of the display size and zoom.
+    pub fn set_thickness(&mut self, thickness: impl Into<Mm>) {
+        self.thickness = thickness.into();
+    }
+
+    /// Sets the line thickness and returns the line style.
+    ///
+    /// Setting this to 0.0 will not hide the line, rather it’s a special value that tells PDF
+    /// viewers to render the line as 1px regardless of the display size and zoom.
+    pub fn with_thickness(mut self, thickness: impl Into<Mm>) -> Self {
+        self.set_thickness(thickness);
+        self
+    }
+
+    /// Returns the line thickness.
+    pub fn thickness(&self) -> Mm {
+        self.thickness
+    }
+
+    /// Sets the line color.
+    pub fn set_color(&mut self, color: Color) {
+        self.color = color;
+    }
+
+    /// Sets the line color and returns the line style.
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.set_color(color);
+        self
+    }
+
+    /// Returns the line color.
+    pub fn color(&self) -> Color {
+        self.color
     }
 }

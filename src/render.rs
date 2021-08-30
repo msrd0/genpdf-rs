@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 Robin Krahl <robin.krahl@ireas.org>
+// SPDX-FileCopyrightText: 2020-2021 Robin Krahl <robin.krahl@ireas.org>
 // SPDX-License-Identifier: Apache-2.0 or MIT
 
 //! Low-level PDF rendering utilities.
@@ -18,15 +18,53 @@
 //! [`Area`]: struct.Area.html
 //! [`TextSection`]: struct.TextSection.html
 
+use std::cell;
 use std::io;
+use std::ops;
+use std::rc;
 
 use crate::error::{Context as _, Error, ErrorKind};
 use crate::fonts;
-use crate::style::{Color, Style};
+use crate::style::{Color, LineStyle, Style};
 use crate::{Margins, Mm, Position, Size};
 
 #[cfg(feature = "images")]
 use crate::{Rotation, Scale};
+
+/// A position relative to the top left corner of a layer.
+struct LayerPosition(Position);
+
+impl LayerPosition {
+    pub fn from_area(area: &Area<'_>, position: Position) -> Self {
+        Self(position + area.origin)
+    }
+}
+
+/// A position relative to the bottom left corner of a layer (“user space” in PDF terms).
+struct UserSpacePosition(Position);
+
+impl UserSpacePosition {
+    pub fn from_layer(layer: &Layer<'_>, position: LayerPosition) -> Self {
+        Self(Position::new(
+            position.0.x,
+            layer.page.size.height - position.0.y,
+        ))
+    }
+}
+
+impl From<UserSpacePosition> for printpdf::Point {
+    fn from(pos: UserSpacePosition) -> printpdf::Point {
+        printpdf::Point::new(pos.0.x.into(), pos.0.y.into())
+    }
+}
+
+impl ops::Deref for UserSpacePosition {
+    type Target = Position;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Renders a PDF document with one or more pages.
 ///
@@ -62,6 +100,18 @@ impl Renderer {
     /// Sets the PDF conformance for the generated PDF document.
     pub fn with_conformance(mut self, conformance: printpdf::PdfConformance) -> Self {
         self.doc = self.doc.with_conformance(conformance);
+        self
+    }
+
+    /// Sets the creation date for the generated PDF document.
+    pub fn with_creation_date(mut self, date: printpdf::OffsetDateTime) -> Self {
+        self.doc = self.doc.with_creation_date(date);
+        self
+    }
+
+    /// Sets the modification date for the generated PDF document.
+    pub fn with_modification_date(mut self, date: printpdf::OffsetDateTime) -> Self {
+        self.doc = self.doc.with_mod_date(date);
         self
     }
 
@@ -147,8 +197,7 @@ impl Renderer {
 pub struct Page {
     page: printpdf::PdfPageReference,
     size: Size,
-    // invariant: layers.len() >= 1
-    layers: Vec<Layer>,
+    layers: Layers,
 }
 
 impl Page {
@@ -160,14 +209,14 @@ impl Page {
         Page {
             page,
             size,
-            layers: vec![Layer::new(layer, size)],
+            layers: Layers::new(layer),
         }
     }
 
     /// Adds a new layer with the given name to the page.
     pub fn add_layer(&mut self, name: impl Into<String>) {
         let layer = self.page.add_layer(name);
-        self.layers.push(Layer::new(layer, self.size));
+        self.layers.push(layer);
     }
 
     /// Returns the number of layers on this page.
@@ -176,18 +225,68 @@ impl Page {
     }
 
     /// Returns a layer of this page.
-    pub fn get_layer(&self, idx: usize) -> Option<&Layer> {
-        self.layers.get(idx)
+    pub fn get_layer(&self, idx: usize) -> Option<Layer<'_>> {
+        self.layers.get(idx).map(|l| Layer::new(self, l))
     }
 
     /// Returns the first layer of this page.
-    pub fn first_layer(&self) -> &Layer {
-        &self.layers[0]
+    pub fn first_layer(&self) -> Layer<'_> {
+        Layer::new(self, self.layers.first())
     }
 
     /// Returns the last layer of this page.
-    pub fn last_layer(&self) -> &Layer {
-        &self.layers[self.layers.len() - 1]
+    pub fn last_layer(&self) -> Layer<'_> {
+        Layer::new(self, self.layers.last())
+    }
+
+    fn next_layer(&self, layer: &printpdf::PdfLayerReference) -> Layer<'_> {
+        let layer = self.layers.next(layer).unwrap_or_else(|| {
+            let layer = self
+                .page
+                .add_layer(format!("Layer {}", self.layers.len() + 1));
+            self.layers.push(layer)
+        });
+        Layer::new(self, layer)
+    }
+}
+
+#[derive(Debug)]
+struct Layers(cell::RefCell<Vec<rc::Rc<LayerData>>>);
+
+impl Layers {
+    pub fn new(layer: printpdf::PdfLayerReference) -> Self {
+        Self(vec![LayerData::from(layer).into()].into())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.borrow().len()
+    }
+
+    pub fn first(&self) -> rc::Rc<LayerData> {
+        self.0.borrow().first().unwrap().clone()
+    }
+
+    pub fn last(&self) -> rc::Rc<LayerData> {
+        self.0.borrow().last().unwrap().clone()
+    }
+
+    pub fn get(&self, idx: usize) -> Option<rc::Rc<LayerData>> {
+        self.0.borrow().get(idx).cloned()
+    }
+
+    pub fn push(&self, layer: printpdf::PdfLayerReference) -> rc::Rc<LayerData> {
+        let layer_data = rc::Rc::from(LayerData::from(layer));
+        self.0.borrow_mut().push(layer_data.clone());
+        layer_data
+    }
+
+    pub fn next(&self, layer: &printpdf::PdfLayerReference) -> Option<rc::Rc<LayerData>> {
+        self.0
+            .borrow()
+            .iter()
+            .skip_while(|l| l.layer.layer != layer.layer)
+            .nth(1)
+            .cloned()
     }
 }
 
@@ -196,26 +295,167 @@ impl Page {
 /// This is a wrapper around a [`printpdf::PdfLayerReference`][].
 ///
 /// [`printpdf::PdfLayerReference`]: https://docs.rs/printpdf/0.3.2/printpdf/types/pdf_layer/struct.PdfLayerReference.html
-pub struct Layer {
-    layer: printpdf::PdfLayerReference,
-    size: Size,
+#[derive(Clone)]
+pub struct Layer<'p> {
+    page: &'p Page,
+    data: rc::Rc<LayerData>,
 }
 
-impl Layer {
-    fn new(layer: printpdf::PdfLayerReference, size: Size) -> Layer {
-        Layer { layer, size }
+impl<'p> Layer<'p> {
+    fn new(page: &'p Page, data: rc::Rc<LayerData>) -> Layer<'p> {
+        Layer { page, data }
+    }
+
+    /// Returns the next layer of this page.
+    ///
+    /// If this layer is not the last layer, the existing next layer is used.  If it is the last
+    /// layer, a new layer is created and added to the page.
+    pub fn next(&self) -> Layer<'p> {
+        self.page.next_layer(&self.data.layer)
     }
 
     /// Returns a drawable area for this layer.
-    pub fn area(&self) -> Area<'_> {
-        Area::new(self, Position::default(), self.size)
+    pub fn area(&self) -> Area<'p> {
+        Area::new(self.clone(), Position::default(), self.page.size)
+    }
+
+    #[cfg(feature = "images")]
+    fn add_image(
+        &self,
+        image: &image::DynamicImage,
+        position: LayerPosition,
+        scale: Scale,
+        rotation: Rotation,
+        dpi: Option<f64>,
+    ) {
+        let dynamic_image = printpdf::Image::from_dynamic_image(image);
+        let position = self.transform_position(position);
+        dynamic_image.add_to_layer(
+            self.data.layer.clone(),
+            Some(position.x.into()),
+            Some(position.y.into()),
+            rotation.into(),
+            Some(scale.x),
+            Some(scale.y),
+            dpi,
+        );
+    }
+
+    fn add_line_shape<I>(&self, points: I)
+    where
+        I: IntoIterator<Item = LayerPosition>,
+    {
+        let line_points: Vec<_> = points
+            .into_iter()
+            .map(|pos| (self.transform_position(pos).into(), false))
+            .collect();
+        let line = printpdf::Line {
+            points: line_points,
+            is_closed: false,
+            has_fill: false,
+            has_stroke: true,
+            is_clipping_path: false,
+        };
+        self.data.layer.add_shape(line);
+    }
+
+    fn set_fill_color(&self, color: Option<Color>) {
+        if self.data.update_fill_color(color) {
+            self.data
+                .layer
+                .set_fill_color(color.unwrap_or(Color::Rgb(0, 0, 0)).into());
+        }
+    }
+
+    fn set_outline_thickness(&self, thickness: Mm) {
+        if self.data.update_outline_thickness(thickness) {
+            self.data
+                .layer
+                .set_outline_thickness(printpdf::Pt::from(thickness).0);
+        }
+    }
+
+    fn set_outline_color(&self, color: Color) {
+        if self.data.update_outline_color(color) {
+            self.data.layer.set_outline_color(color.into());
+        }
+    }
+
+    fn set_text_cursor(&self, cursor: LayerPosition) {
+        let cursor = self.transform_position(cursor);
+        self.data
+            .layer
+            .set_text_cursor(cursor.x.into(), cursor.y.into());
+    }
+
+    fn begin_text_section(&self) {
+        self.data.layer.begin_text_section();
+    }
+
+    fn end_text_section(&self) {
+        self.data.layer.end_text_section();
+    }
+
+    fn add_line_break(&self) {
+        self.data.layer.add_line_break();
+    }
+
+    fn set_line_height(&self, line_height: Mm) {
+        self.data.layer.set_line_height(line_height.0);
+    }
+
+    fn set_font(&self, font: &printpdf::IndirectFontRef, font_size: u8) {
+        self.data.layer.set_font(font, font_size.into());
+    }
+
+    fn write_positioned_codepoints<P, C>(&self, positions: P, codepoints: C)
+    where
+        P: IntoIterator<Item = i64>,
+        C: IntoIterator<Item = u16>,
+    {
+        self.data
+            .layer
+            .write_positioned_codepoints(positions.into_iter().zip(codepoints.into_iter()));
     }
 
     /// Transforms the given position that is relative to the upper left corner of the layer to a
     /// position that is relative to the lower left corner of the layer (as used by `printpdf`).
-    fn transform_position(&self, mut position: Position) -> Position {
-        position.y = self.size.height - position.y;
-        position
+    fn transform_position(&self, position: LayerPosition) -> UserSpacePosition {
+        UserSpacePosition::from_layer(self, position)
+    }
+}
+
+#[derive(Debug)]
+struct LayerData {
+    layer: printpdf::PdfLayerReference,
+    fill_color: cell::Cell<Color>,
+    outline_color: cell::Cell<Color>,
+    outline_thickness: cell::Cell<Mm>,
+}
+
+impl LayerData {
+    pub fn update_fill_color(&self, color: Option<Color>) -> bool {
+        let color = color.unwrap_or(Color::Rgb(0, 0, 0));
+        self.fill_color.replace(color) != color
+    }
+
+    pub fn update_outline_color(&self, color: Color) -> bool {
+        self.outline_color.replace(color) != color
+    }
+
+    pub fn update_outline_thickness(&self, thickness: Mm) -> bool {
+        self.outline_thickness.replace(thickness) != thickness
+    }
+}
+
+impl From<printpdf::PdfLayerReference> for LayerData {
+    fn from(layer: printpdf::PdfLayerReference) -> Self {
+        Self {
+            layer,
+            fill_color: Color::Rgb(0, 0, 0).into(),
+            outline_color: Color::Rgb(0, 0, 0).into(),
+            outline_thickness: Mm::from(printpdf::Pt(1.0)).into(),
+        }
     }
 }
 
@@ -226,18 +466,31 @@ impl Layer {
 ///
 /// [`printpdf::PdfLayerReference`]: https://docs.rs/printpdf/0.3.2/printpdf/types/pdf_layer/struct.PdfLayerReference.html
 #[derive(Clone)]
-pub struct Area<'a> {
-    layer: &'a Layer,
+pub struct Area<'p> {
+    layer: Layer<'p>,
     origin: Position,
     size: Size,
 }
 
-impl<'a> Area<'a> {
-    fn new(layer: &'a Layer, origin: Position, size: Size) -> Area<'a> {
+impl<'p> Area<'p> {
+    fn new(layer: Layer<'p>, origin: Position, size: Size) -> Area<'p> {
         Area {
             layer,
             origin,
             size,
+        }
+    }
+
+    /// Returns a copy of this area on the next layer of the page.
+    ///
+    /// If this area is not on the last layer, the existing next layer is used.  If it is on the
+    /// last layer, a new layer is created and added to the page.
+    pub fn next_layer(&self) -> Self {
+        let layer = self.layer.next();
+        Self {
+            layer,
+            origin: self.origin,
+            size: self.size,
         }
     }
 
@@ -289,7 +542,7 @@ impl<'a> Area<'a> {
     /// The returned vector has the same number of elements as the provided slice.  The width of
     /// the *i*-th area is *width \* weights[i] / total_weight*, where *width* is the width of this
     /// area, and *total_weight* is the sum of all given weights.
-    pub fn split_horizontally(&self, weights: &[usize]) -> Vec<Area<'a>> {
+    pub fn split_horizontally(&self, weights: &[usize]) -> Vec<Area<'p>> {
         let total_weight: usize = weights.iter().sum();
         let factor = self.size.width / total_weight as f64;
         let widths = weights.iter().map(|weight| factor * *weight as f64);
@@ -324,43 +577,21 @@ impl<'a> Area<'a> {
         rotation: Rotation,
         dpi: Option<f64>,
     ) {
-        let dynamic_image = printpdf::Image::from_dynamic_image(image);
-        let real_position = self.transform_position(position);
-        let layer = self.layer().clone();
-        dynamic_image.add_to_layer(
-            layer,
-            Some(real_position.x.into()),
-            Some(real_position.y.into()),
-            rotation.into(),
-            Some(scale.x),
-            Some(scale.y),
-            dpi,
-        );
+        self.layer
+            .add_image(image, self.position(position), scale, rotation, dpi);
     }
 
-    /// Draws a line with the given points and the given style.
+    /// Draws a line with the given points and the given line style.
     ///
-    /// Currently, this method only uses the color of the given style as the outline color (if set).
     /// The points are relative to the upper left corner of the area.
-    pub fn draw_line(&self, points: Vec<Position>, style: Style) {
-        let line_points: Vec<_> = points
-            .into_iter()
-            .map(|pos| (self.transform_position(pos).into(), false))
-            .collect();
-        let line = printpdf::Line {
-            points: line_points,
-            is_closed: false,
-            has_fill: false,
-            has_stroke: true,
-            is_clipping_path: false,
-        };
-        if let Some(color) = style.color() {
-            self.layer().set_outline_color(color.into());
-        }
-        self.layer().add_shape(line);
-        if style.color().is_some() {
-            self.layer().set_outline_color(Color::Rgb(0, 0, 0).into());
-        }
+    pub fn draw_line<I>(&self, points: I, line_style: LineStyle)
+    where
+        I: IntoIterator<Item = Position>,
+    {
+        self.layer.set_outline_thickness(line_style.thickness());
+        self.layer.set_outline_color(line_style.color());
+        self.layer
+            .add_line_shape(points.into_iter().map(|pos| self.position(pos)));
     }
 
     /// Tries to draw the given string at the given position and returns `true` if the area was
@@ -375,7 +606,9 @@ impl<'a> Area<'a> {
         style: Style,
         s: S,
     ) -> Result<bool, Error> {
-        if let Some(mut section) = self.text_section(font_cache, position, style) {
+        if let Some(mut section) =
+            self.text_section(font_cache, position, style.metrics(font_cache))
+        {
             section.print_str(s, style)?;
             Ok(true)
         } else {
@@ -392,71 +625,79 @@ impl<'a> Area<'a> {
         &self,
         font_cache: &'f fonts::FontCache,
         position: Position,
-        style: Style,
-    ) -> Option<TextSection<'_, 'f, 'a>> {
-        TextSection::new(font_cache, self, position, style)
+        metrics: fonts::Metrics,
+    ) -> Option<TextSection<'f, 'p>> {
+        let mut area = self.clone();
+        area.add_offset(position);
+        TextSection::new(font_cache, area, metrics)
     }
 
-    /// Transforms the given position that is relative to the upper left corner of the area to a
-    /// position that is relative to the lower left corner of its layer (as used by `printpdf`).
-    fn transform_position(&self, mut position: Position) -> Position {
-        position += self.origin;
-        self.layer.transform_position(position)
-    }
-
-    fn layer(&self) -> &printpdf::PdfLayerReference {
-        &self.layer.layer
+    /// Returns a position relative to the top left corner of this area.
+    fn position(&self, position: Position) -> LayerPosition {
+        LayerPosition::from_area(self, position)
     }
 }
 
 /// A text section that is drawn on an area of a PDF layer.
-pub struct TextSection<'a, 'f, 'l> {
+pub struct TextSection<'f, 'p> {
     font_cache: &'f fonts::FontCache,
-    area: &'a Area<'l>,
-    line_height: Mm,
-    cursor: Position,
-    fill_color: Option<Color>,
+    area: Area<'p>,
+    is_first: bool,
+    metrics: fonts::Metrics,
+    font: Option<(printpdf::IndirectFontRef, u8)>,
 }
 
-impl<'a, 'f, 'l> TextSection<'a, 'f, 'l> {
+impl<'f, 'p> TextSection<'f, 'p> {
     fn new(
         font_cache: &'f fonts::FontCache,
-        area: &'a Area<'l>,
-        position: Position,
-        style: Style,
-    ) -> Option<TextSection<'a, 'f, 'l>> {
-        let height = style.font(font_cache).glyph_height(style.font_size());
-
-        if position.y + height > area.size.height {
+        area: Area<'p>,
+        metrics: fonts::Metrics,
+    ) -> Option<TextSection<'f, 'p>> {
+        if metrics.glyph_height > area.size.height {
             return None;
         }
 
-        let line_height = style.line_height(font_cache);
-        let section = TextSection {
+        area.layer.begin_text_section();
+        area.layer.set_line_height(metrics.line_height);
+
+        Some(TextSection {
             font_cache,
             area,
-            line_height,
-            cursor: position,
-            fill_color: None,
-        };
-        section.layer().begin_text_section();
-        section.layer().set_line_height(line_height.into());
-        let cursor = area.transform_position(position);
-        section
-            .layer()
-            .set_text_cursor(cursor.x.into(), (cursor.y - height).into());
-        Some(section)
+            is_first: true,
+            metrics,
+            font: None,
+        })
+    }
+
+    fn set_text_cursor(&self, x_offset: Mm) {
+        let cursor = self
+            .area
+            .position(Position::new(x_offset, self.metrics.ascent));
+        self.area.layer.set_text_cursor(cursor);
+    }
+
+    fn set_font(&mut self, font: &printpdf::IndirectFontRef, font_size: u8) {
+        let font_is_set = self
+            .font
+            .as_ref()
+            .map(|(font, font_size)| (font, *font_size))
+            .map(|data| data == (font, font_size))
+            .unwrap_or_default();
+        if !font_is_set {
+            self.font = Some((font.clone(), font_size));
+            self.area.layer.set_font(font, font_size);
+        }
     }
 
     /// Tries to add a new line and returns `true` if the area was large enough to fit the new
     /// line.
     #[must_use]
     pub fn add_newline(&mut self) -> bool {
-        if self.cursor.y + self.line_height > self.area.size.height {
+        if self.metrics.line_height > self.area.size.height {
             false
         } else {
-            self.layer().add_line_break();
-            self.cursor.y += self.line_height;
+            self.area.layer.add_line_break();
+            self.area.add_offset((0, self.metrics.line_height));
             true
         }
     }
@@ -466,48 +707,49 @@ impl<'a, 'f, 'l> TextSection<'a, 'f, 'l> {
     /// The font cache for this text section must contain the PDF font for the given style.
     pub fn print_str(&mut self, s: impl AsRef<str>, style: Style) -> Result<(), Error> {
         let font = style.font(self.font_cache);
+        let s = s.as_ref();
+
+        // Adjust cursor to remove left bearing of the first character of the first string
+        if self.is_first {
+            let x_offset = if let Some(first_c) = s.chars().next() {
+                style.char_left_side_bearing(self.font_cache, first_c) * -1.0
+            } else {
+                Mm(0.0)
+            };
+            self.set_text_cursor(x_offset);
+        }
+        self.is_first = false;
 
         let positions = font
-            .kerning(self.font_cache, s.as_ref().chars())
+            .kerning(self.font_cache, s.chars())
             .into_iter()
             // Kerning is measured in 1/1000 em
             .map(|pos| pos * -1000.0)
             .map(|pos| pos as i64);
         let codepoints = if font.is_builtin() {
             // Built-in fonts always use the Windows-1252 encoding
-            encode_win1252(s.as_ref())?
+            encode_win1252(s)?
         } else {
-            font.glyph_ids(&self.font_cache, s.as_ref().chars())
+            font.glyph_ids(&self.font_cache, s.chars())
         };
 
         let font = self
             .font_cache
             .get_pdf_font(font)
             .expect("Could not find PDF font in font cache");
-        if let Some(color) = style.color() {
-            self.layer().set_fill_color(color.into());
-        } else if self.fill_color.is_some() {
-            self.layer().set_fill_color(Color::Rgb(0, 0, 0).into());
-        }
-        self.fill_color = style.color();
-        self.layer().set_font(font, style.font_size().into());
+        self.area.layer.set_fill_color(style.color());
+        self.set_font(font, style.font_size());
 
-        self.layer()
-            .write_positioned_codepoints(positions.zip(codepoints.iter().copied()));
+        self.area
+            .layer
+            .write_positioned_codepoints(positions, codepoints);
         Ok(())
-    }
-
-    fn layer(&self) -> &printpdf::PdfLayerReference {
-        self.area.layer()
     }
 }
 
-impl<'a, 'f, 'l> Drop for TextSection<'a, 'f, 'l> {
+impl<'f, 'p> Drop for TextSection<'f, 'p> {
     fn drop(&mut self) {
-        if self.fill_color.is_some() {
-            self.layer().set_fill_color(Color::Rgb(0, 0, 0).into());
-        }
-        self.layer().end_text_section();
+        self.area.layer.end_text_section();
     }
 }
 

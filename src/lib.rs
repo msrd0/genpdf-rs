@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 Robin Krahl <robin.krahl@ireas.org>
+// SPDX-FileCopyrightText: 2020-2021 Robin Krahl <robin.krahl@ireas.org>
 // SPDX-License-Identifier: Apache-2.0 or MIT
 
 //! User-friendly PDF generator written in pure Rust.
@@ -148,7 +148,7 @@
 //! [`Style`]: style/struct.Style.html
 //! [`StyledString`]: style/struct.StyledString.html
 //! [`examples/demo.rs`]: https://git.sr.ht/~ireas/genpdf-rs/tree/master/examples/demo.rs
-//! [this PDF document]: https://git.sr.ht/~ireas/genpdf-rs/blob/master/examples/demo.pdf
+//! [this PDF document]: https://genpdf-rs.ireas.org/examples/demo.pdf
 //! [Windows-1252]: https://en.wikipedia.org/wiki/Windows-1252
 
 #![warn(missing_docs, rust_2018_idioms)]
@@ -318,12 +318,6 @@ impl Position {
             x: x.into(),
             y: y.into(),
         }
-    }
-}
-
-impl From<Position> for printpdf::Point {
-    fn from(pos: Position) -> printpdf::Point {
-        printpdf::Point::new(pos.x.into(), pos.y.into())
     }
 }
 
@@ -590,6 +584,8 @@ pub struct Document {
     paper_size: Size,
     decorator: Option<Box<dyn PageDecorator>>,
     conformance: Option<PdfConformance>,
+    creation_date: Option<printpdf::OffsetDateTime>,
+    modification_date: Option<printpdf::OffsetDateTime>,
 }
 
 impl Document {
@@ -604,6 +600,8 @@ impl Document {
             paper_size: PaperSize::A4.into(),
             decorator: None,
             conformance: None,
+            creation_date: None,
+            modification_date: None,
         }
     }
 
@@ -698,6 +696,16 @@ impl Document {
         }));
     }
 
+    /// Sets the creation date of the PDF file.
+    pub fn set_creation_date(&mut self, date: printpdf::OffsetDateTime) {
+        self.creation_date = Some(date);
+    }
+
+    /// Sets the modification date of the PDF file.
+    pub fn set_modification_date(&mut self, date: printpdf::OffsetDateTime) {
+        self.modification_date = Some(date);
+    }
+
     /// Adds the given element to the document.
     ///
     /// The given element is appended to the list of elements that is rendered by the root
@@ -706,7 +714,7 @@ impl Document {
     /// [`LinearLayout`]: elements/struct.LinearLayout.html
     /// [`render`]: #method.render
     /// [`render_to_file`]: #method.render_to_file
-    pub fn push<E: Element + 'static>(&mut self, element: E) {
+    pub fn push<E: elements::IntoBoxedElement>(&mut self, element: E) {
         self.root.push(element);
     }
 
@@ -719,6 +727,12 @@ impl Document {
         let mut renderer = render::Renderer::new(self.paper_size, &self.title)?;
         if let Some(conformance) = self.conformance {
             renderer = renderer.with_conformance(conformance);
+        }
+        if let Some(creation_date) = self.creation_date {
+            renderer = renderer.with_creation_date(creation_date);
+        }
+        if let Some(modification_date) = self.modification_date {
+            renderer = renderer.with_modification_date(modification_date);
         }
         self.context.font_cache.load_pdf_fonts(&renderer)?;
         loop {
@@ -753,6 +767,12 @@ impl Document {
         let file = fs::File::create(path)
             .with_context(|| format!("Could not create file {}", path.display()))?;
         self.render(file)
+    }
+}
+
+impl<E: elements::IntoBoxedElement> std::iter::Extend<E> for Document {
+    fn extend<I: IntoIterator<Item = E>>(&mut self, iter: I) {
+        self.root.extend(iter)
     }
 }
 
@@ -927,12 +947,12 @@ pub trait Element {
         style: style::Style,
     ) -> Result<RenderResult, error::Error>;
 
-    /// Draws a frame around this element.
-    fn framed(self) -> elements::FramedElement<Self>
+    /// Draws a frame around this element using the given line style.
+    fn framed(self, line_style: impl Into<style::LineStyle>) -> elements::FramedElement<Self>
     where
         Self: Sized,
     {
-        elements::FramedElement::new(self)
+        elements::FramedElement::with_line_style(self, line_style)
     }
 
     /// Adds a padding to this element.
@@ -986,6 +1006,32 @@ impl Context {
 
 #[cfg(test)]
 mod tests {
+    impl float_cmp::ApproxEq for super::Mm {
+        type Margin = float_cmp::F64Margin;
+
+        fn approx_eq<M: Into<Self::Margin>>(self, other: Self, margin: M) -> bool {
+            self.0.approx_eq(other.0, margin)
+        }
+    }
+
+    impl float_cmp::ApproxEq for super::Size {
+        type Margin = float_cmp::F64Margin;
+
+        fn approx_eq<M: Into<Self::Margin>>(self, other: Self, margin: M) -> bool {
+            let margin = margin.into();
+            self.width.approx_eq(other.width, margin) && self.height.approx_eq(other.height, margin)
+        }
+    }
+
+    impl float_cmp::ApproxEq for super::Position {
+        type Margin = float_cmp::F64Margin;
+
+        fn approx_eq<M: Into<Self::Margin>>(self, other: Self, margin: M) -> bool {
+            let margin = margin.into();
+            self.x.approx_eq(other.x, margin) && self.y.approx_eq(other.y, margin)
+        }
+    }
+
     #[test]
     fn test_rotation() {
         use super::Rotation;
