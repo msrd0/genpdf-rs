@@ -533,8 +533,8 @@ impl<'p> Area<'p> {
     }
 
     /// Sets the outline thickness (i.e. thickness of lines etc.) of the current layer.
-    pub(crate) fn set_outline_thickness(&mut self, thickness: f64) {
-        self.layer.layer.set_outline_thickness(thickness);
+    pub(crate) fn set_outline_thickness(&mut self, thickness: Mm) {
+        self.layer.set_outline_thickness(thickness);
     }
 
     /// Splits this area horizontally using the given weights.

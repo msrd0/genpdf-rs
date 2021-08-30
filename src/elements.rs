@@ -219,7 +219,7 @@ impl Element for HorizontalLine {
         &mut self,
         _: &Context,
         area: render::Area<'_>,
-        style: Style,
+        _: Style,
     ) -> Result<RenderResult, crate::error::Error> {
         let mut result = RenderResult::default();
         let width = area.size().width;
@@ -228,7 +228,7 @@ impl Element for HorizontalLine {
                 Position::new(0, self.margin),
                 Position::new(width, self.margin),
             ],
-            style,
+            LineStyle::new(),
         );
         result.size += Size::new(width, self.margin * 2.0);
         Ok(result)

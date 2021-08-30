@@ -835,7 +835,7 @@ type HeaderCallback = Box<dyn Fn(usize) -> Box<dyn Element>>;
 pub struct SimplePageDecorator {
     page: usize,
     margins: Option<Margins>,
-    outline_thickness: Option<f64>,
+    outline_thickness: Option<Mm>,
     header_cb: Option<HeaderCallback>,
 }
 
@@ -853,7 +853,7 @@ impl SimplePageDecorator {
     }
 
     /// Sets the outline thickness (i.e. thickness of lines etc.) for all pages of this document.
-    pub fn set_outline_thickness(&mut self, thickness: f64) {
+    pub fn set_outline_thickness(&mut self, thickness: Mm) {
         self.outline_thickness = Some(thickness);
     }
 
