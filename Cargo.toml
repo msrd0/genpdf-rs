@@ -21,8 +21,11 @@ name = "images"
 required-features = ["images"]
 
 [dependencies]
-lopdf = "0.27"
 rusttype = "0.8"
+
+[dependencies.lopdf]
+version = "0.27"
+default-features = false
 
 [dependencies.image]
 version = "0.23.12"
