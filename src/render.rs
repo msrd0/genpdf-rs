@@ -332,12 +332,14 @@ impl<'p> Layer<'p> {
         let position = self.transform_position(position);
         dynamic_image.add_to_layer(
             self.data.layer.clone(),
-            Some(position.x.into()),
-            Some(position.y.into()),
-            rotation.into(),
-            Some(scale.x),
-            Some(scale.y),
-            dpi,
+			printpdf::ImageTransform {
+				translate_x: Some(position.x.into()),
+				translate_y: Some(position.y.into()),
+				rotate: rotation.into(),
+				scale_x: Some(scale.x),
+				scale_y: Some(scale.y),
+				dpi,
+			}
         );
     }
 

@@ -371,6 +371,15 @@ impl From<Rotation> for Option<f64> {
     }
 }
 
+impl From<Rotation> for Option<printpdf::ImageRotation> {
+	fn from(rotation: Rotation) -> Self {
+		rotation.degrees().map(|angle_ccw_degrees| printpdf::ImageRotation {
+			angle_ccw_degrees,
+			..Default::default()
+		})
+	}
+}
+
 /// A size to stretch an image on a PDF layer; measured in percentage.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Add, AddAssign, Sub, SubAssign)]
 pub struct Scale {

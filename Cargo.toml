@@ -21,7 +21,7 @@ name = "images"
 required-features = ["images"]
 
 [dependencies]
-lopdf = "0.26"
+lopdf = "0.27"
 rusttype = "0.8"
 
 [dependencies.image]
@@ -35,6 +35,7 @@ optional = true
 
 [dependencies.printpdf]
 git = "https://github.com/msrd0/printpdf"
+branch = "0.5.x"
 default-features = false
 
 [dependencies.derive_more]
